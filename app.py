@@ -4,17 +4,12 @@ import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 from requests import Session
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import RidgeCV
-try:
-    import lightgbm as lgb
-    HAS_LGB = True
-except ImportError:
-    HAS_LGB = False
 from fredapi import Fred
 
 # 網頁版面設定
-st.set_page_config(page_title="三合一多元資產量化配置與動態對沖儀表板", layout="wide")
+st.set_page_config(page_title="三合一多元資產量化配置與配置明細儀表板", layout="wide")
 
 st.markdown(
     """
@@ -43,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (美股選股 + 跨資產ETF + 公債總經預測)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (含每月各策略詳細持倉明細)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -145,9 +140,7 @@ if run_btn:
             # 模組一：美股多因子選股策略
             # ==========================================
             us_stocks = US_KEYS[:20]
-            stock_fundamentals = {}
-            for t in us_stocks:
-                stock_fundamentals[t] = {"Value": 0.05, "Quality": 0.15, "Size": 25.0}
+            stock_fundamentals = {t: {"Value": 0.05, "Quality": 0.15, "Size": 25.0} for t in us_stocks}
 
             all_us_tickers = us_stocks + ["^GSPC"]
             df_us_raw = yf.download(all_us_tickers, start=fetch_start.strftime("%Y-%m-%d"), end=fetch_end.strftime("%Y-%m-%d"), progress=False, session=session)
@@ -209,7 +202,13 @@ if run_btn:
                 res = pd.DataFrame({"Stock": te_d.index.get_level_values("Stock"), "Actual": te_d["Next_Return"].values, "Pred": preds})
                 res["Rank"] = res["Pred"].rank(ascending=False, method='first')
                 long_df = res[res["Rank"] <= n_top]
-                us_port_ret.append({"Date": test_dt, "Strategy_Return": long_df["Actual"].mean()})
+                long_names = [US_STOCK_MAP.get(s, s) for s in long_df["Stock"].values]
+                
+                us_port_ret.append({
+                    "Date": test_dt, 
+                    "Strategy_Return": long_df["Actual"].mean(),
+                    "Details": ", ".join(long_names)
+                })
 
             df_strat_us = pd.DataFrame(us_port_ret).set_index("Date")
 
@@ -221,15 +220,21 @@ if run_btn:
             df_etf_prices = df_etf_raw["Adj Close"] if "Adj Close" in df_etf_raw.columns else df_etf_raw["Close"]
             df_etf_monthly = df_etf_prices.resample("ME").last().ffill().bfill()
             df_etf_ret = df_etf_monthly.pct_change().shift(-1) * 100
-            df_etf_mom = df_etf_monthly.pct_change(3) # 3個月動能輪動
+            df_etf_mom = df_etf_monthly.pct_change(3)
 
             etf_port_ret = []
             etf_dates = df_etf_monthly.index[3:-1]
             for dt in etf_dates:
                 mom_slice = df_etf_mom.loc[dt].dropna()
-                top_etfs = mom_slice.nlargest(3).index.tolist() # 選出動能最強的前 3 檔 ETF
+                top_etfs = mom_slice.nlargest(3).index.tolist()
                 ret_slice = df_etf_ret.loc[dt, top_etfs]
-                etf_port_ret.append({"Date": dt, "Strategy_Return": ret_slice.mean()})
+                etf_names = [f"{e} ({ETF_STOCK_MAP.get(e, e)})" for e in top_etfs]
+                
+                etf_port_ret.append({
+                    "Date": dt, 
+                    "Strategy_Return": ret_slice.mean(),
+                    "Details": ", ".join(etf_names)
+                })
             
             df_strat_etf = pd.DataFrame(etf_port_ret).set_index("Date")
 
@@ -250,7 +255,7 @@ if run_btn:
             bond_m = df_bond_prices.resample("ME").last().ffill()
             macro_full = pd.concat([macro_raw, bond_m], axis=1).dropna()
             
-            macro_full["Target_Delta"] = macro_full["^TYX"].shift(-3) - macro_full["^TYX"] # 預測未來3個月殖利率變化
+            macro_full["Target_Delta"] = macro_full["^TYX"].shift(-3) - macro_full["^TYX"]
             bond_dates = macro_full.index[train_window:-3]
             
             bond_port_ret = []
@@ -265,9 +270,18 @@ if run_btn:
                 model_b = RidgeCV(alphas=alphas).fit(tr_sub[features], tr_sub["Target_Delta"])
                 pred_delta = model_b.predict(te_row)[0]
                 
-                # 預期殖利率下降 -> 買入 TLT (多頭)；預期殖利率上升 -> 買入 TBT (空頭)
-                strat_ret = tlt_fwd_ret.loc[dt] if pred_delta < 0 else tbt_fwd_ret.loc[dt]
-                bond_port_ret.append({"Date": dt, "Strategy_Return": strat_ret})
+                if pred_delta < 0:
+                    strat_ret = tlt_fwd_ret.loc[dt]
+                    bond_action = "🟢 買入 TLT (預期殖利率下降/降息)"
+                else:
+                    strat_ret = tbt_fwd_ret.loc[dt]
+                    bond_action = "🔴 買入 TBT (預期殖利率上升/升息)"
+
+                bond_port_ret.append({
+                    "Date": dt, 
+                    "Strategy_Return": strat_ret,
+                    "Details": bond_action
+                })
 
             df_strat_bond = pd.DataFrame(bond_port_ret).set_index("Date")
 
@@ -277,8 +291,11 @@ if run_btn:
             combined = pd.DataFrame({
                 "US_Stock": df_strat_us["Strategy_Return"],
                 "ETF_Rot": df_strat_etf["Strategy_Return"],
-                "Bond_Pred": df_strat_bond["Strategy_Return"]
-            }).dropna()
+                "Bond_Pred": df_strat_bond["Strategy_Return"],
+                "US_Details": df_strat_us["Details"],
+                "ETF_Details": df_strat_etf["Details"],
+                "Bond_Details": df_strat_bond["Details"]
+            }).dropna(subset=["US_Stock", "ETF_Rot", "Bond_Pred"])
 
             combined = combined.loc[pd.to_datetime(target_start_date):pd.to_datetime(target_end_date)]
             combined["Combined_Return"] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].mean(axis=1)
@@ -322,8 +339,17 @@ if st.session_state.get("multi_exec", False):
     st.line_chart(chart_df)
 
     st.markdown("---")
-    st.markdown('<div class="section-header">📅 每月綜合配置與各子策略報酬明細表</div>', unsafe_allow_html=True)
-    display_tbl = res_df[["Combined_Return", "US_Stock", "ETF_Rot", "Bond_Pred"]].copy()
-    display_tbl.columns = ["綜合組合報酬(%)", "美股選股報酬(%)", "ETF輪動報酬(%)", "公債策略報酬(%)"]
-    display_tbl = display_tbl.round(2)
-    st.dataframe(display_tbl, use_container_width=True)
+    st.markdown('<div class="section-header">📅 每月三大策略詳細配置內容與報酬明細表</div>', unsafe_allow_html=True)
+    st.markdown("說明：下方表格清楚列出每一個月份中，三個子策略各自選出的持倉標的與訊號，以及當月個別報酬率與綜合組合報酬。")
+
+    detail_tbl = res_df[["US_Details", "US_Stock", "ETF_Details", "ETF_Rot", "Bond_Details", "Bond_Pred", "Combined_Return"]].copy()
+    detail_tbl.columns = [
+        "美股選股持倉 (Top 20%)", "美股報酬(%)", 
+        "ETF輪動持倉 (Top 3)", "ETF報酬(%)", 
+        "公債總經訊號 (TLT/TBT)", "公債報酬(%)", 
+        "綜合組合報酬(%)"
+    ]
+    detail_tbl.index = detail_tbl.index.strftime("%Y-%m-%d")
+    detail_tbl = detail_tbl.sort_index(ascending=False)
+    
+    st.dataframe(detail_tbl, use_container_width=True)
