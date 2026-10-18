@@ -38,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 修正 Metric 顯示與時間對齊)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 歷史數據從 2006 年起算)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -103,7 +103,7 @@ BUILTIN_FRED_KEY = "e5cc131f943db8f74ee8587e6713a359"
 st.sidebar.success("🔑 FRED API Key 已自動內建載入")
 
 train_window = st.sidebar.slider("機器學習訓練期數 (Train Window)", min_value=12, max_value=60, value=36, step=6)
-target_start_date = st.sidebar.date_input("回測開始日期", pd.to_datetime("2024-01-31"))
+target_start_date = st.sidebar.date_input("回測開始日期", pd.to_datetime("2014-01-31"))
 target_end_date = st.sidebar.date_input("回測結束日期", pd.to_datetime("2026-12-31"))
 
 st.sidebar.markdown("---")
@@ -116,14 +116,15 @@ if "multi_exec" not in st.session_state:
     st.session_state.multi_exec = False
 
 if run_btn:
-    with st.spinner("正在自動同步三大模組數據、執行機器學習運算並合成綜合投資組合中..."):
+    with st.spinner("正在自動同步三大模組歷史數據（從 2006 年起算）、執行機器學習運算並合成綜合投資組合中..."):
         try:
             session = Session()
             session.headers.update({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             })
             
-            fetch_start = pd.to_datetime("2020-01-01")
+            # 💡 將下載歷史數據起點提前至 2006 年
+            fetch_start = pd.to_datetime("2006-01-01")
             fetch_end = pd.to_datetime("2028-12-31")
 
             # ==========================================
