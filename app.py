@@ -38,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 FRED API Key | 含每月策略持倉明細)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 修正指標數值與走勢圖對齊)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -99,7 +99,6 @@ ETF_KEYS = list(ETF_STOCK_MAP.keys())
 # ==========================================
 st.sidebar.header("⚙️ 全域回測參數設定")
 
-# 內建 FRED API Key
 BUILTIN_FRED_KEY = "e5cc131f943db8f74ee8587e6713a359"
 st.sidebar.success("🔑 FRED API Key 已自動內建載入")
 
@@ -137,11 +136,10 @@ if run_btn:
             df_us_raw = yf.download(all_us_tickers, start=fetch_start.strftime("%Y-%m-%d"), end=fetch_end.strftime("%Y-%m-%d"), progress=False, session=session)
             df_us_prices = df_us_raw["Adj Close"] if "Adj Close" in df_us_raw.columns else df_us_raw["Close"]
             
-            bm_us_ret = df_us_prices["^GSPC"].resample("ME").last().pct_change().shift(-1)
             us_stock_prices = df_us_prices[[c for c in us_stocks if c in df_us_prices.columns]].ffill().bfill()
             
             df_us_monthly = us_stock_prices.resample("ME").last()
-            df_us_next_ret = df_us_monthly.pct_change().shift(-1)
+            df_us_next_ret = df_us_monthly.pct_change().shift(-1) * 100
             df_us_mom = df_us_monthly.pct_change(12)
             df_us_vol = (us_stock_prices.pct_change().rolling(252).std() * np.sqrt(252)).resample("ME").last()
 
@@ -159,7 +157,7 @@ if run_btn:
                         "Date": date, "Stock": ticker,
                         "Value": fund["Value"] * 100, "Momentum": mom_v * 100,
                         "Quality": fund["Quality"] * 100, "LowVol": vol_v * 100, "Size": fund["Size"],
-                        "Next_Return": ret_v * 100
+                        "Next_Return": ret_v
                     })
             
             df_us_ml = pd.DataFrame(us_dataset).set_index(["Date", "Stock"])
@@ -286,9 +284,12 @@ if run_btn:
                 "US_Details": df_strat_us["Details"],
                 "ETF_Details": df_strat_etf["Details"],
                 "Bond_Details": df_strat_bond["Details"]
-            }).dropna(subset=["US_Stock", "ETF_Rot", "Bond_Pred"])
+            })
 
+            # 嚴格對沖填補，確保整段回測時間連續
             combined = combined.loc[pd.to_datetime(target_start_date):pd.to_datetime(target_end_date)]
+            combined[["US_Stock", "ETF_Rot", "Bond_Pred"]] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].fillna(0.0)
+            
             combined["Combined_Return"] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].mean(axis=1)
 
             combined["US_Nav"] = (1 + combined["US_Stock"] / 100).cumprod()
@@ -308,6 +309,8 @@ if st.session_state.get("multi_exec", False):
     st.markdown('<div class="section-header">📊 三合一多元資產配置績效與風險比較摘要</div>', unsafe_allow_html=True)
 
     def get_metrics(nav_series, ret_series):
+        if nav_series.empty or len(nav_series) < 2:
+            return 0.0, 0.0, 0.0
         total_days = (res_df.index[-1] - res_df.index[0]).days
         years = max(total_days / 365.25, 0.5)
         cagr = (nav_series.iloc[-1] ** (1 / years)) - 1.0
