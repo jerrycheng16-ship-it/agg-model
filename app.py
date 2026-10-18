@@ -38,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 修正指標數值與走勢圖對齊)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 修正 Metric 顯示與時間對齊)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -286,7 +286,6 @@ if run_btn:
                 "Bond_Details": df_strat_bond["Details"]
             })
 
-            # 嚴格對沖填補，確保整段回測時間連續
             combined = combined.loc[pd.to_datetime(target_start_date):pd.to_datetime(target_end_date)]
             combined[["US_Stock", "ETF_Rot", "Bond_Pred"]] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].fillna(0.0)
             
@@ -315,18 +314,18 @@ if st.session_state.get("multi_exec", False):
         years = max(total_days / 365.25, 0.5)
         cagr = (nav_series.iloc[-1] ** (1 / years)) - 1.0
         mdd = ((nav_series - nav_series.cummax()) / nav_series.cummax()).min()
-        return cagr * 100, mdd * 100, ret_series.mean() * 12
+        return float(cagr * 100), float(mdd * 100), float(ret_series.mean() * 12)
 
-    cagr_com, mdd_com, ann_ret_com = get_metrics(res_df["Combined_Nav"], res_df["Combined_Return"])
+    cagr_com, mdd_com, _ = get_metrics(res_df["Combined_Nav"], res_df["Combined_Return"])
     cagr_us, mdd_us, _ = get_metrics(res_df["US_Nav"], res_df["US_Stock"])
     cagr_etf, mdd_etf, _ = get_metrics(res_df["ETF_Nav"], res_df["ETF_Rot"])
     cagr_bond, mdd_bond, _ = get_metrics(res_df["Bond_Nav"], res_df["Bond_Pred"])
 
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-    mcol1.metric("🌐 綜合投資組合 (1/3配置)", f"年化報酬: {cagr_com:.2f}%", f"最大回落 (MDD): {mdd_com:.2f}%")
-    mcol2.metric("🇺🇸 美股選股策略", f"年化報酬: {cagr_us:.2f}%", f"最大回落 (MDD): {mdd_us:.2f}%")
-    mcol3.metric("🌐 跨資產 ETF 輪動", f"年化報酬: {cagr_etf:.2f}%", f"最大回落 (MDD): {mdd_etf:.2f}%")
-    mcol4.metric("🏛️ 公債總經預測策略", f"年化報酬: {cagr_bond:.2f}%", f"最大回落 (MDD): {mdd_bond:.2f}%")
+    mcol1.metric("🌐 綜合投資組合", f"{cagr_com:.2f}%", f"MDD: {mdd_com:.2f}%")
+    mcol2.metric("🇺🇸 美股選股策略", f"{cagr_us:.2f}%", f"MDD: {mdd_us:.2f}%")
+    mcol3.metric("🌐 跨資產 ETF 輪動", f"{cagr_etf:.2f}%", f"MDD: {mdd_etf:.2f}%")
+    mcol4.metric("🏛️ 公債總經預測", f"{cagr_bond:.2f}%", f"MDD: {mdd_bond:.2f}%")
 
     st.markdown("---")
     st.markdown('<div class="section-header">📈 各策略與綜合組合累積淨值走勢圖 (NAV)</div>', unsafe_allow_html=True)
