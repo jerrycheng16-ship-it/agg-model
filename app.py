@@ -38,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (含每月各策略詳細持倉明細)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 FRED API Key | 含每月策略持倉明細)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -99,16 +99,9 @@ ETF_KEYS = list(ETF_STOCK_MAP.keys())
 # ==========================================
 st.sidebar.header("⚙️ 全域回測參數設定")
 
-default_fred_key = ""
-try:
-    if "FRED_API_KEY" in st.secrets:
-        default_fred_key = "e5cc131f943db8f74ee8587e6713a359"
-except Exception:
-    pass
-
-fred_api_key = st.sidebar.text_input("FRED API Key (公債模組必填)", type="password", value=default_fred_key)
-if not fred_api_key:
-    st.sidebar.warning("⚠️ 請輸入 FRED API Key 以執行公債總經預測模組。")
+# 內建 FRED API Key
+BUILTIN_FRED_KEY = "e5cc131f943db8f74ee8587e6713a359"
+st.sidebar.success("🔑 FRED API Key 已自動內建載入")
 
 train_window = st.sidebar.slider("機器學習訓練期數 (Train Window)", min_value=12, max_value=60, value=36, step=6)
 target_start_date = st.sidebar.date_input("回測開始日期", pd.to_datetime("2024-01-31"))
@@ -124,10 +117,8 @@ if "multi_exec" not in st.session_state:
     st.session_state.multi_exec = False
 
 if run_btn:
-    if not fred_api_key:
-        st.error("❌ 請先在側邊欄輸入 FRED API Key！")
-    else:
-        with st.spinner("正在同步三大模組數據、執行機器學習運算並合成綜合投資組合中..."):
+    with st.spinner("正在自動同步三大模組數據、執行機器學習運算並合成綜合投資組合中..."):
+        try:
             session = Session()
             session.headers.update({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -241,7 +232,7 @@ if run_btn:
             # ==========================================
             # 模組三：債券總經預測策略 (TLT / TBT)
             # ==========================================
-            fred = Fred(api_key=fred_api_key.strip())
+            fred = Fred(api_key=BUILTIN_FRED_KEY)
             unrate = fred.get_series('UNRATE')
             t5yie = fred.get_series('T5YIE')
             wei = fred.get_series('WEI')
@@ -307,6 +298,9 @@ if run_btn:
 
             st.session_state.combined_results = combined
             st.session_state.multi_exec = True
+
+        except Exception as e:
+            st.error(f"❌ 執行回測時發生錯誤: {e}")
 
 if st.session_state.get("multi_exec", False):
     res_df = st.session_state.combined_results
