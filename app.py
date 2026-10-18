@@ -102,7 +102,7 @@ st.sidebar.header("⚙️ 全域回測參數設定")
 default_fred_key = ""
 try:
     if "FRED_API_KEY" in st.secrets:
-        default_fred_key = st.secrets["FRED_API_KEY"]
+        default_fred_key = "e5cc131f943db8f74ee8587e6713a359"
 except Exception:
     pass
 
