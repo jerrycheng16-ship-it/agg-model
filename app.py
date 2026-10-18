@@ -38,7 +38,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 歷史數據從 2006 年起算)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🌐 三合一多元資產量化配置系統 (內建 API | 總經數據自動向前補齊不中斷)</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 0. 帳號密碼登入驗證保護機制
@@ -116,14 +116,13 @@ if "multi_exec" not in st.session_state:
     st.session_state.multi_exec = False
 
 if run_btn:
-    with st.spinner("正在自動同步三大模組歷史數據（從 2006 年起算）、執行機器學習運算並合成綜合投資組合中..."):
+    with st.spinner("正在自動同步三大模組歷史數據、執行機器學習運算並合成綜合投資組合中..."):
         try:
             session = Session()
             session.headers.update({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             })
             
-            # 💡 將下載歷史數據起點提前至 2006 年
             fetch_start = pd.to_datetime("2006-01-01")
             fetch_end = pd.to_datetime("2028-12-31")
 
@@ -243,9 +242,11 @@ if run_btn:
             df_bond_prices = df_bond_raw["Adj Close"] if "Adj Close" in df_bond_raw.columns else df_bond_raw["Close"]
             
             bond_m = df_bond_prices.resample("ME").last().ffill()
-            macro_full = pd.concat([macro_raw, bond_m], axis=1).dropna()
             
+            # 💡 關鍵修正：使用 ffill() 遞補延遲發布的總經數據，避免 dropna 把最新月份砍掉
+            macro_full = pd.concat([macro_raw, bond_m], axis=1).ffill()
             macro_full["Target_Delta"] = macro_full["^TYX"].shift(-3) - macro_full["^TYX"]
+            
             bond_dates = macro_full.index[train_window:-3]
             
             bond_port_ret = []
@@ -257,14 +258,18 @@ if run_btn:
                 tr_sub = macro_full.loc[:dt].iloc[-train_window-3:-3].dropna(subset=features + ["Target_Delta"])
                 te_row = macro_full.loc[dt, features].values.reshape(1, -1)
                 
-                model_b = RidgeCV(alphas=alphas).fit(tr_sub[features], tr_sub["Target_Delta"])
-                pred_delta = model_b.predict(te_row)[0]
-                
+                # 若訓練集足夠則進行機器學習預測，否則預設買入 TLT
+                if len(tr_sub) >= 12:
+                    model_b = RidgeCV(alphas=alphas).fit(tr_sub[features], tr_sub["Target_Delta"])
+                    pred_delta = model_b.predict(te_row)[0]
+                else:
+                    pred_delta = -0.01
+
                 if pred_delta < 0:
-                    strat_ret = tlt_fwd_ret.loc[dt]
+                    strat_ret = tlt_fwd_ret.loc[dt] if dt in tlt_fwd_ret.index else 0.0
                     bond_action = "🟢 買入 TLT (預期殖利率下降/降息)"
                 else:
-                    strat_ret = tbt_fwd_ret.loc[dt]
+                    strat_ret = tbt_fwd_ret.loc[dt] if dt in tbt_fwd_ret.index else 0.0
                     bond_action = "🔴 買入 TBT (預期殖利率上升/升息)"
 
                 bond_port_ret.append({
@@ -289,7 +294,8 @@ if run_btn:
 
             combined = combined.loc[pd.to_datetime(target_start_date):pd.to_datetime(target_end_date)]
             combined[["US_Stock", "ETF_Rot", "Bond_Pred"]] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].fillna(0.0)
-            
+            combined["Bond_Details"] = combined["Bond_Details"].fillna("🟢 買入 TLT (預期殖利率下降/降息)")
+
             combined["Combined_Return"] = combined[["US_Stock", "ETF_Rot", "Bond_Pred"]].mean(axis=1)
 
             combined["US_Nav"] = (1 + combined["US_Stock"] / 100).cumprod()
